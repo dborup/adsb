@@ -4,9 +4,10 @@ import time
 import json
 from datetime import datetime
 
+# Configuration
 AARHUS_LAT = 56.1629
 AARHUS_LON = 10.2039
-RADIUS_KM = 25
+RADIUS_KM = 20
 ALTITUDE_MAX = 15000  # feet
 DATA_URL = "http://192.168.8.31:8080/data/aircraft.json"
 LOG_FILE = "over_aarhus_log.json"
@@ -32,8 +33,15 @@ def get_distance_and_bearing(ac):
     if lat is None or lon is None:
         return None, None
     distance = haversine(lat, lon, AARHUS_LAT, AARHUS_LON)
-    bearing = calculate_bearing(AARHUS_LAT, AARHUS_LON, lat, lon)
+    bearing = calculate_bearing(lat, lon, AARHUS_LAT, AARHUS_LON)
     return distance, bearing
+
+def is_heading_toward_aarhus(ac, bearing_to_aarhus):
+    heading = ac.get("true_heading") or ac.get("track")
+    if heading is None:
+        return False
+    diff = abs((bearing_to_aarhus - heading + 180) % 360 - 180)
+    return diff <= 20
 
 def fetch_aircraft():
     try:
@@ -59,14 +67,20 @@ def log_aircraft(ac, distance, bearing):
         f.write(json.dumps(log_entry) + "\n")
 
 def main():
-    print("✈️ Tracking aircraft over Aarhus (<5 km, <5000 ft)...\n")
+    print("✈️ Tracking aircraft toward Aarhus (<20 km, <5000 ft)...\n")
     while True:
         aircraft = fetch_aircraft()
         count = 0
         for ac in aircraft:
             distance, bearing = get_distance_and_bearing(ac)
             altitude = ac.get("alt_baro")
-            if distance is not None and distance <= RADIUS_KM and altitude is not None and altitude <= ALTITUDE_MAX:
+            if distance is None or altitude is None:
+                continue
+            if (
+                distance <= RADIUS_KM
+                and altitude <= ALTITUDE_MAX
+                and is_heading_toward_aarhus(ac, bearing)
+            ):
                 count += 1
                 print(
                     f"→ {ac.get('flight', '???').strip()} {ac.get('desc', '?')} "
@@ -74,7 +88,7 @@ def main():
                 )
                 log_aircraft(ac, distance, bearing)
         if count == 0:
-            print("No aircraft over Aarhus in range/altitude.")
+            print("No aircraft heading toward Aarhus in range/altitude.")
         print("-" * 50)
         time.sleep(10)
 
